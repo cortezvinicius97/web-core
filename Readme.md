@@ -7,12 +7,12 @@ A lightweight, Spring Boot-inspired web framework for Java that provides automat
 Gradle Groovy
 
 ```Groovy
-implementation 'com.vcinsidedigital:web-core:1.0.0'
+implementation 'com.vcinsidedigital:web-core:1.0.1'
 ```
 
 Gradle Kotlin
 ```kotlin
-implementation('com.vcinsidedigital:web-core:1.0.0')
+implementation('com.vcinsidedigital:web-core:1.0.1')
 ```
 
 Maven
@@ -21,12 +21,16 @@ Maven
     <dependency>
         <groupId>com.vcinsidedigital</groupId>
         <artifactId>web-core</artifactId>
-        <version>1.0.0</version>
+        <version>1.0.1</version>
     </dependency>
 </dependencies>
 ```
 
 
+
+# Web Framework
+
+A lightweight, Spring Boot-inspired web framework for Java that provides automatic component scanning, dependency injection, and RESTful API development capabilities.
 
 ## Features
 
@@ -66,8 +70,8 @@ Add the following dependency to your `pom.xml`:
 ```java
 package com.example;
 
-import com.framework.WebServerApplication;
-import com.framework.annotations.WebApplication;
+import com.vcinsidedigital.webcore.WebServerApplication;
+import com.vcinsidedigital.webcore.annotations.WebApplication;
 
 @WebApplication
 public class Application extends WebServerApplication {
@@ -97,7 +101,7 @@ public class Employee {
 ```java
 package com.example.repository;
 
-import com.framework.annotations.Repository;
+import com.vcinsidedigital.webcore.annotations.Repository;
 import com.example.model.Employee;
 import java.util.*;
 
@@ -129,8 +133,8 @@ public class EmployeeRepository {
 ```java
 package com.example.service;
 
-import com.framework.annotations.Service;
-import com.framework.annotations.Inject;
+import com.vcinsidedigital.webcore.annotations.Service;
+import com.vcinsidedigital.webcore.annotations.Inject;
 import com.example.repository.EmployeeRepository;
 import com.example.model.Employee;
 import java.util.List;
@@ -160,57 +164,75 @@ public class EmployeeService {
 }
 ```
 
-### 5. Create a REST Controller
+### 5. Create Controllers
+
+All controller methods should return `HttpResponse` for full control:
 
 ```java
 package com.example.controller;
 
-import com.framework.annotations.*;
+import com.vcinsidedigital.webcore.annotations.*;
+import com.vcinsidedigital.webcore.http.HttpResponse;
 import com.example.service.EmployeeService;
 import com.example.model.Employee;
 import java.util.List;
 
-// Default path is /api
 @RestController
 public class EmployeeController {
     
     @Inject
     private EmployeeService employeeService;
     
-    @Get("/employees")  // Full path: /api/employees
-    public List<Employee> getAllEmployees() {
-        return employeeService.getAllEmployees();
+    // Body receives List<Employee> - auto converted to JSON
+    @Get("/employees")
+    public HttpResponse getAllEmployees() {
+        List<Employee> employees = employeeService.getAllEmployees();
+        return new HttpResponse()
+            .status(200)
+            .contentType("application/json")
+            .body(employees);  // List is auto-converted to JSON
     }
     
-    @Get("/employees/{id}")  // Full path: /api/employees/{id}
-    public Employee getEmployee(@Path("id") Long id) {
-        return employeeService.getEmployeeById(id);
+    // Body receives Employee object
+    @Get("/employees/{id}")
+    public HttpResponse getEmployee(@Path("id") Long id) {
+        Employee employee = employeeService.getEmployeeById(id);
+        return new HttpResponse()
+            .status(200)
+            .contentType("application/json")
+            .body(employee);  // Object is auto-converted to JSON
     }
     
-    @Post("/employees")  // Full path: /api/employees
-    public Employee createEmployee(@Body Employee employee) {
-        return employeeService.createEmployee(employee);
-    }
-    
-    @Put("/employees/{id}")  // Full path: /api/employees/{id}
-    public Employee updateEmployee(@Path("id") Long id, @Body Employee employee) {
-        employee.setId(id);
-        return employeeService.createEmployee(employee);
-    }
-    
-    @Delete("/employees/{id}")  // Full path: /api/employees/{id}
-    public void deleteEmployee(@Path("id") Long id) {
-        employeeService.deleteEmployee(id);
+    // Body receives String directly
+    @Post("/employees")
+    public HttpResponse createEmployee(@Body Employee employee) {
+        Employee created = employeeService.createEmployee(employee);
+        return new HttpResponse()
+            .status(201)
+            .contentType("application/json")
+            .body(created);
     }
 }
+```
 
-// Custom base path
-@RestController(path = "/apicustom")
-public class CustomController {
+#### HTML Pages
+
+```java
+package com.example.controller;
+
+import com.vcinsidedigital.webcore.annotations.*;
+import com.vcinsidedigital.webcore.http.HttpResponse;
+
+@Controller
+public class PageController {
     
-    @Get("/data")  // Full path: /apicustom/data
-    public String getData() {
-        return "{\"data\": \"custom\"}";
+    @Get("/")
+    public HttpResponse home() {
+        String html = "<h1>Welcome Home</h1><p>This is the home page</p>";
+        return new HttpResponse()
+            .status(200)
+            .contentType("text/html; charset=utf-8")
+            .body(html);  // Body receives HTML string
     }
 }
 ```
@@ -319,6 +341,51 @@ public Employee updateEmployee(
 }
 ```
 
+### Using Middleware
+
+```java
+package com.example.controller;
+
+import com.vcinsidedigital.webcore.annotations.*;
+import com.example.middleware.AuthMiddleware;
+import com.example.middleware.LoggingMiddleware;
+
+@RestController
+@Middleware({LoggingMiddleware.class, AuthMiddleware.class})
+public class SecureController {
+    
+    @Get("/secure/data")
+    public String getSecureData() {
+        return "{\"data\": \"sensitive\"}";
+    }
+}
+```
+
+### Using Custom HTTP Status
+
+```java
+package com.example.controller;
+
+import com.vcinsidedigital.webcore.annotations.*;
+import com.vcinsidedigital.webcore.http.HttpStatus;
+
+@RestController
+public class StatusController {
+    
+    @ResponseStatus(HttpStatus.CREATED)
+    @Post("/items")
+    public String createItem(@Body String item) {
+        return "{\"message\": \"Created\"}";
+    }
+    
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @Delete("/items/{id}")
+    public void deleteItem(@Path("id") Long id) {
+        // Delete logic
+    }
+}
+```
+
 ## Configuration
 
 ### Base Package Scanning
@@ -326,6 +393,11 @@ public Employee updateEmployee(
 By default, the framework scans the package where your main application class is located. You can specify a custom base package:
 
 ```java
+package com.example;
+
+import com.vcinsidedigital.webcore.WebServerApplication;
+import com.vcinsidedigital.webcore.annotations.WebApplication;
+
 @WebApplication(basePackage = "com.myproject")
 public class Application extends WebServerApplication {
     public static void main(String[] args) {
@@ -443,6 +515,11 @@ Import these endpoints:
 ### Constructor Injection
 
 ```java
+package com.example.service;
+
+import com.vcinsidedigital.webcore.annotations.Service;
+import com.vcinsidedigital.webcore.annotations.Inject;
+
 @Service
 public class EmployeeService {
     private final EmployeeRepository repository;
@@ -457,6 +534,11 @@ public class EmployeeService {
 ### Field Injection
 
 ```java
+package com.example.service;
+
+import com.vcinsidedigital.webcore.annotations.Service;
+import com.vcinsidedigital.webcore.annotations.Inject;
+
 @Service
 public class EmployeeService {
     @Inject
@@ -469,6 +551,10 @@ public class EmployeeService {
 **`@RestController` has a default base path of `/api`:**
 
 ```java
+package com.example.controller;
+
+import com.vcinsidedigital.webcore.annotations.*;
+
 // Default: All routes start with /api
 @RestController
 public class EmployeeController {
@@ -503,6 +589,10 @@ public class RootController {
 **`@Controller` has no default base path:**
 
 ```java
+package com.example.controller;
+
+import com.vcinsidedigital.webcore.annotations.*;
+
 @Controller  // Default path is empty ""
 public class PageController {
     

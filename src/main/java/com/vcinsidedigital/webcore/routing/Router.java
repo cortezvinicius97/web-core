@@ -10,23 +10,17 @@ import java.util.*;
 
 public class Router {
     private final List<Route> routes = new ArrayList<>();
-    private final Map<Object, Boolean> controllerTypes = new HashMap<>();
     private final Gson gson = new Gson();
 
     public void registerController(Object controller) {
         Class<?> clazz = controller.getClass();
         String basePath = "";
-        boolean isRestController = false;
 
         if (clazz.isAnnotationPresent(RestController.class)) {
             basePath = clazz.getAnnotation(RestController.class).path();
-            isRestController = true;
         } else if (clazz.isAnnotationPresent(Controller.class)) {
             basePath = clazz.getAnnotation(Controller.class).path();
-            isRestController = false;
         }
-
-        controllerTypes.put(controller, isRestController);
 
         for (Method method : clazz.getDeclaredMethods()) {
             registerRoute(controller, method, basePath, Get.class, "GET");
@@ -80,12 +74,26 @@ public class Router {
 
                     // Execute controller method
                     Object result = invokeHandler(route, request);
-                    boolean isRestController = controllerTypes.getOrDefault(route.getController(), true);
 
-                    // Check for @ResponseStatus annotation
+                    // Check if result is already an HttpResponse
+                    if (result instanceof HttpResponse) {
+                        HttpResponse response = (HttpResponse) result;
+
+                        // Apply @ResponseStatus if present and status not already set
+                        Method handlerMethod = route.getHandlerMethod();
+                        if (handlerMethod.isAnnotationPresent(ResponseStatus.class) && response.getStatusCode() == 200) {
+                            ResponseStatus responseStatus = handlerMethod.getAnnotation(ResponseStatus.class);
+                            response.status(responseStatus.value().getCode());
+                        }
+
+                        return response;
+                    }
+
+                    // Otherwise, create response from result
+                    HttpResponse response = createResponse(result);
+
+                    // Apply @ResponseStatus annotation
                     Method handlerMethod = route.getHandlerMethod();
-                    HttpResponse response = createResponse(result, isRestController);
-
                     if (handlerMethod.isAnnotationPresent(ResponseStatus.class)) {
                         ResponseStatus responseStatus = handlerMethod.getAnnotation(ResponseStatus.class);
                         response.status(responseStatus.value().getCode());
@@ -177,22 +185,28 @@ public class Router {
         return value;
     }
 
-    private HttpResponse createResponse(Object result, boolean isRestController) {
+    private HttpResponse createResponse(Object result) {
+        // Se já é HttpResponse, retorna direto
+        if (result instanceof HttpResponse) {
+            return (HttpResponse) result;
+        }
+
+        // Para null, retorna 204
         if (result == null) {
             return new HttpResponse().status(204);
         }
 
+        // Para qualquer outro tipo, serializa para JSON e coloca no body
+        String jsonBody;
         if (result instanceof String) {
-            HttpResponse response = new HttpResponse().body((String) result);
-            // Se for @Controller (não REST), retorna como HTML
-            if (!isRestController) {
-                response.contentType("text/html; charset=utf-8");
-            }
-            return response;
+            jsonBody = (String) result;
+        } else {
+            jsonBody = gson.toJson(result);
         }
 
-        // Para objetos, sempre retorna JSON
-        return new HttpResponse().body(gson.toJson(result));
+        return new HttpResponse()
+                .contentType("application/json")
+                .body(jsonBody);
     }
 
     public List<Route> getRoutes() {
