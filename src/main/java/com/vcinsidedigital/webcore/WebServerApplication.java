@@ -3,6 +3,8 @@ package com.vcinsidedigital.webcore;
 
 import com.vcinsidedigital.webcore.annotations.*;
 import com.vcinsidedigital.webcore.core.*;
+import com.vcinsidedigital.webcore.plugin.PluginInterface;
+import com.vcinsidedigital.webcore.plugin.PluginManager;
 import com.vcinsidedigital.webcore.routing.Router;
 import com.vcinsidedigital.webcore.http.*;
 import com.sun.net.httpserver.*;
@@ -16,47 +18,95 @@ public abstract class WebServerApplication {
     private static DIContainer container;
     private static Router router;
     private static HttpServer server;
+    private static final PluginManager pluginManager = new PluginManager();
     private static int port = 8080;
+    private static String hostName = "localhost";
 
     public static void run(Class<?> applicationClass, String[] args) {
         try {
             System.out.println("\n╔════════════════════════════════════════════════════╗");
-            System.out.println("║         WEB FRAMEWORK - Starting Application      ║");
+            System.out.println("║         WEB FRAMEWORK - Starting Application       ║");
             System.out.println("╚════════════════════════════════════════════════════╝\n");
 
             // Parse port from args
             port = parsePort(args);
+            hostName = parseHost(args);
 
-            // Initialize container and router
+
+            // Initialize container, router and plugin manager
             container = new DIContainer();
             router = new Router();
 
             // Get base package
             String basePackage = getBasePackage(applicationClass);
 
-            // Scan and register components
+            // Scan and register components from main application
             System.out.println("📦 Scanning package: " + basePackage);
             scanAndRegister(basePackage);
 
-            // Register controllers
+            // Load plugins
+            pluginManager.loadPlugins(getInstance());
+
+            // Scan and register components from plugins
+            List<String> pluginPackages = pluginManager.getPluginPackages();
+            if (!pluginPackages.isEmpty()) {
+                System.out.println("\n📦 Scanning plugin packages:");
+                for (String pluginPackage : pluginPackages) {
+                    System.out.println("  Scanning: " + pluginPackage);
+                    scanAndRegister(pluginPackage);
+                }
+            }
+
+            // Register controllers (from both app and plugins)
             System.out.println("\n🔌 Registering routes:");
             registerControllers();
 
-            // Start HTTP server
-            System.out.println("\n🚀 Starting HTTP server...");
-            startHttpServer();
+            // Start plugins
+            pluginManager.startPlugins(getInstance());
 
-            System.out.println("\n╔════════════════════════════════════════════════════╗");
-            System.out.println("║   ✅ Application started successfully!             ║");
-            System.out.println("║   🌐 Server running at: http://localhost:" + port + "      ║");
-            System.out.println("║   📝 Press Ctrl+C to stop                         ║");
-            System.out.println("╚════════════════════════════════════════════════════╝\n");
+            // Check if any plugin wants to handle server initialization
+            if (pluginManager.hasServerInitializer()) {
+                System.out.println("\n🚀 Starting HTTP server via plugin...");
+                pluginManager.initializeServer(router, args, hostName, port);
+            } else {
+                // Start HTTP server with default implementation
+                System.out.println("\n🚀 Starting HTTP server...");
+                startHttpServer();
+            }
 
         } catch (Exception e) {
             System.err.println("\n❌ Failed to start application:");
             e.printStackTrace();
             System.exit(1);
         }
+    }
+
+    private static WebServerApplication getInstance() {
+        return new WebServerApplication() {};
+    }
+
+    public static void registerPlugin(PluginInterface plugin) {
+        pluginManager.registerPlugin(plugin);
+    }
+
+    public static void registerPlugin(Class<? extends PluginInterface> pluginClass) {
+        pluginManager.registerPlugin(pluginClass);
+    }
+
+    public static DIContainer getContainer() {
+        return container;
+    }
+
+    public static Router getRouter() {
+        return router;
+    }
+
+    public static PluginManager getPluginManager() {
+        return pluginManager;
+    }
+
+    public static int getPort() {
+        return port;
     }
 
     private static int parsePort(String[] args) {
@@ -66,6 +116,15 @@ public abstract class WebServerApplication {
             }
         }
         return 8080;
+    }
+
+    private static String parseHost(String[] args){
+        for (String arg:args){
+            if (arg.startsWith("--host=")){
+                return arg.substring(7);
+            }
+        }
+        return "localhost";
     }
 
     private static String getBasePackage(Class<?> applicationClass) {
@@ -84,7 +143,31 @@ public abstract class WebServerApplication {
 
         System.out.println("  Found " + classes.size() + " components:");
 
+        List<Class<?>> pluginClasses = new ArrayList<>();
+        List<Class<?>> regularComponents = new ArrayList<>();
+
         for (Class<?> clazz : classes) {
+            if (clazz.isAnnotationPresent(Plugin.class) && PluginInterface.class.isAssignableFrom(clazz)) {
+                pluginClasses.add(clazz);
+            } else {
+                regularComponents.add(clazz);
+            }
+        }
+
+        for (Class<?> clazz : pluginClasses) {
+            try {
+                @SuppressWarnings("unchecked")
+                Class<? extends PluginInterface> pluginClass = (Class<? extends PluginInterface>) clazz;
+
+                if (!pluginManager.isPluginRegistered(pluginClass)) {
+                    pluginManager.registerPlugin(pluginClass);
+                }
+            } catch (Exception e) {
+                System.err.println("    ├─ ❌ Failed to register plugin: " + clazz.getSimpleName());
+            }
+        }
+
+        for (Class<?> clazz : regularComponents) {
             String type = getComponentType(clazz);
             System.out.println("    ├─ " + type + ": " + clazz.getSimpleName());
             container.register(clazz);
@@ -111,19 +194,13 @@ public abstract class WebServerApplication {
     }
 
     private static void startHttpServer() throws IOException {
-        server = HttpServer.create(new InetSocketAddress(port), 0);
+        server = HttpServer.create(new InetSocketAddress(hostName,port), 0);
 
         server.createContext("/", exchange -> {
             try {
-                // Parse request
                 HttpRequest request = parseRequest(exchange);
-
-                // Handle request
                 HttpResponse response = router.handleRequest(request);
-
-                // Send response
                 sendResponse(exchange, response);
-
             } catch (Exception e) {
                 e.printStackTrace();
                 sendErrorResponse(exchange, 500, "Internal Server Error");
@@ -132,22 +209,25 @@ public abstract class WebServerApplication {
 
         server.setExecutor(null);
         server.start();
+
+        System.out.println("\n╔════════════════════════════════════════════════════╗");
+        System.out.println("║   ✅ Application started successfully!             ║");
+        System.out.println("║   🌐 Server running at: http://"+hostName+":" + port + "      ║");
+        System.out.println("║   📝 Press Ctrl+C to stop                          ║");
+        System.out.println("╚════════════════════════════════════════════════════╝\n");
     }
 
     private static HttpRequest parseRequest(HttpExchange exchange) throws IOException {
         String method = exchange.getRequestMethod();
         String path = exchange.getRequestURI().getPath();
 
-        // Parse query parameters
         Map<String, String> queryParams = parseQueryParams(exchange.getRequestURI().getQuery());
 
-        // Read body
         String body = null;
         if ("POST".equals(method) || "PUT".equals(method) || "PATCH".equals(method)) {
             body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
         }
 
-        // Get headers
         Map<String, String> headers = new HashMap<>();
         exchange.getRequestHeaders().forEach((key, values) -> {
             if (!values.isEmpty()) {
@@ -171,13 +251,11 @@ public abstract class WebServerApplication {
         return params;
     }
 
-    private static void sendResponse(HttpExchange exchange, HttpResponse response) throws IOException {
-        // Set headers
+    public static void sendResponse(HttpExchange exchange, HttpResponse response) throws IOException {
         exchange.getResponseHeaders().set("Content-Type", response.getContentType());
         response.getHeaders().forEach((key, value) ->
                 exchange.getResponseHeaders().set(key, value));
 
-        // Send response
         byte[] bytes = response.getBody() != null ?
                 response.getBody().getBytes(StandardCharsets.UTF_8) : new byte[0];
 
@@ -192,7 +270,7 @@ public abstract class WebServerApplication {
         exchange.close();
     }
 
-    private static void sendErrorResponse(HttpExchange exchange, int status, String message) throws IOException {
+    public static void sendErrorResponse(HttpExchange exchange, int status, String message) throws IOException {
         String body = "{\"error\": \"" + message + "\"}";
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
 

@@ -68,6 +68,7 @@ public class PackageScanner {
                 clazz.isAnnotationPresent(Service.class) ||
                 clazz.isAnnotationPresent(Repository.class) ||
                 clazz.isAnnotationPresent(RestController.class) ||
-                clazz.isAnnotationPresent(Controller.class);
+                clazz.isAnnotationPresent(Controller.class) ||
+                clazz.isAnnotationPresent(Plugin.class);
     }
 }
