@@ -3,6 +3,7 @@ package com.vcinsidedigital.webcore.plugin;
 import com.sun.net.httpserver.HttpServer;
 import com.vcinsidedigital.webcore.WebServerApplication;
 import com.vcinsidedigital.webcore.routing.Router;
+import com.vcinsidedigital.webcore.server.ServerConfiguration;
 
 public abstract class AbstractPlugin implements PluginInterface
 {
@@ -40,5 +41,15 @@ public abstract class AbstractPlugin implements PluginInterface
     @Override
     public boolean isInitializeServer() {
         return false;
+    }
+
+    @Override
+    public String getBasePackage() {
+        return PluginInterface.super.getBasePackage();
+    }
+
+    @Override
+    public ServerConfiguration getServerConfiguration() {
+        return PluginInterface.super.getServerConfiguration();
     }
 }

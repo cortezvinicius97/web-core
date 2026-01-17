@@ -1,6 +1,11 @@
 package com.vcinsidedigital.webcore.routing;
 
 import com.vcinsidedigital.webcore.annotations.*;
+import com.vcinsidedigital.webcore.core.PackageScanner;
+import com.vcinsidedigital.webcore.extensibility.AnnotationHandlerRegistry;
+import com.vcinsidedigital.webcore.extensibility.ComponentAnnotationHandler;
+import com.vcinsidedigital.webcore.extensibility.ParameterAnnotationHandler;
+import com.vcinsidedigital.webcore.extensibility.ParameterContext;
 import com.vcinsidedigital.webcore.http.*;
 import com.google.gson.Gson;
 import com.vcinsidedigital.webcore.middleware.MiddlewareHandler;
@@ -16,10 +21,19 @@ public class Router {
         Class<?> clazz = controller.getClass();
         String basePath = "";
 
+        // Check built-in controller annotations
         if (clazz.isAnnotationPresent(RestController.class)) {
             basePath = clazz.getAnnotation(RestController.class).path();
         } else if (clazz.isAnnotationPresent(Controller.class)) {
             basePath = clazz.getAnnotation(Controller.class).path();
+        } else {
+            // Check custom controller handlers
+            for (ComponentAnnotationHandler handler : AnnotationHandlerRegistry.getInstance().getComponentHandlers()) {
+                if (handler.isController(clazz)) {
+                    basePath = handler.getBasePath(clazz);
+                    break;
+                }
+            }
         }
 
         for (Method method : clazz.getDeclaredMethods()) {
@@ -159,7 +173,10 @@ public class Router {
         Parameter[] params = method.getParameters();
         Object[] args = new Object[params.length];
 
+        ParameterContext context = new ParameterContext(request);
+
         for (int i = 0; i < params.length; i++) {
+            // Try built-in parameter annotations first
             if (params[i].isAnnotationPresent(Path.class)) {
                 String paramName = params[i].getAnnotation(Path.class).value();
                 String value = request.getPathParams().get(paramName);
@@ -170,11 +187,27 @@ public class Router {
                 String paramName = params[i].getAnnotation(Query.class).value();
                 String value = request.getQueryParams().get(paramName);
                 args[i] = convertParameter(value, params[i].getType());
+            } else {
+                // Try custom parameter handlers from plugins
+                boolean handled = false;
+                for (ParameterAnnotationHandler handler : AnnotationHandlerRegistry.getInstance().getParameterHandlers()) {
+                    if (handler.canHandle(params[i])) {
+                        args[i] = handler.resolveParameter(params[i], context);
+                        handled = true;
+                        break;
+                    }
+                }
+
+                // If not handled, leave as null
+                if (!handled) {
+                    args[i] = null;
+                }
             }
         }
 
         return method.invoke(route.getController(), args);
     }
+
 
     private Object convertParameter(String value, Class<?> type) {
         if (value == null) return null;

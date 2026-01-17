@@ -1,8 +1,6 @@
 package com.example.plugins.hello.controller;
 
-import com.example.plugins.hello.middleware.HelloPluginMiddleware;
 import com.vcinsidedigital.webcore.annotations.Get;
-import com.vcinsidedigital.webcore.annotations.Middleware;
 import com.vcinsidedigital.webcore.annotations.RestController;
 import com.vcinsidedigital.webcore.http.HttpResponse;
 

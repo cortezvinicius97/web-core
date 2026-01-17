@@ -3,6 +3,7 @@ package com.vcinsidedigital.webcore.plugin;
 import com.sun.net.httpserver.HttpServer;
 import com.vcinsidedigital.webcore.WebServerApplication;
 import com.vcinsidedigital.webcore.routing.Router;
+import com.vcinsidedigital.webcore.server.ServerConfiguration;
 
 public interface PluginInterface {
 
@@ -57,5 +58,13 @@ public interface PluginInterface {
      */
     default void onServerInit(Router router, String[] args, String hostname, int port) {
         // Default implementation does nothing
+    }
+
+    /**
+     * Provide server configuration customizations
+     * Return null if plugin doesn't customize the server
+     */
+    default ServerConfiguration getServerConfiguration() {
+        return null;
     }
 }

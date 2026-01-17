@@ -3,10 +3,19 @@ package com.vcinsidedigital.webcore.plugin;
 import java.util.*;
 
 import com.vcinsidedigital.webcore.routing.Router;
+import com.vcinsidedigital.webcore.server.ServerConfiguration;
+import com.vcinsidedigital.webcore.server.ServerCustomizer;
+
+import com.vcinsidedigital.webcore.routing.Router;
+import com.vcinsidedigital.webcore.server.ServerConfiguration;
+import com.vcinsidedigital.webcore.server.ServerCustomizer;
+import java.util.*;
 
 public class PluginManager {
     private final List<PluginInterface> plugins = new ArrayList<>();
     private final Map<String, PluginInterface> pluginIds = new HashMap<>();
+    private final Set<String> registeredPluginPackages = new HashSet<>();
+    private final Set<String> failedPluginPackages = new HashSet<>();
 
     public void registerPlugin(PluginInterface plugin) {
         String pluginId = plugin.getId();
@@ -29,20 +38,56 @@ public class PluginManager {
 
         plugins.add(plugin);
         pluginIds.put(pluginId, plugin);
+        registeredPluginPackages.add(plugin.getBasePackage());
         System.out.println("  ✅ Plugin registered: " + plugin.getName() + " v" + plugin.getVersion() + " (ID: " + pluginId + ")");
     }
 
     public void registerPlugin(Class<? extends PluginInterface> pluginClass) {
         try {
             PluginInterface plugin = pluginClass.getDeclaredConstructor().newInstance();
+
+            // Check for duplicate ID BEFORE registering
+            String pluginId = plugin.getId();
+            if (pluginIds.containsKey(pluginId)) {
+                PluginInterface existingPlugin = pluginIds.get(pluginId);
+                throw new DuplicatePluginException(
+                        pluginId,
+                        existingPlugin.getName() + " v" + existingPlugin.getVersion(),
+                        plugin.getName() + " v" + plugin.getVersion()
+                );
+            }
+
+            // Now actually register
             registerPlugin(plugin);
+
         } catch (DuplicatePluginException e) {
             // Re-throw duplicate exceptions
             throw e;
         } catch (Exception e) {
-            System.err.println("  ❌ Failed to register plugin: " + pluginClass.getName());
-            e.printStackTrace();
+            System.err.println("  ❌ Failed to instantiate plugin: " + pluginClass.getName());
+            throw new RuntimeException("Failed to instantiate plugin: " + pluginClass.getName(), e);
         }
+    }
+
+    /**
+     * Mark a package as failed (plugin registration failed)
+     * Components from this package should not be registered
+     */
+    public void markPackageAsFailed(String packageName) {
+        failedPluginPackages.add(packageName);
+    }
+
+    /**
+     * Check if a package is from a failed plugin
+     */
+    public boolean isPackageFailed(String packageName) {
+        // Check exact match or if package is sub-package of failed plugin
+        for (String failedPackage : failedPluginPackages) {
+            if (packageName.equals(failedPackage) || packageName.startsWith(failedPackage + ".")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public boolean isPluginRegistered(Class<? extends PluginInterface> pluginClass) {
@@ -52,6 +97,10 @@ public class PluginManager {
 
     public boolean isPluginIdRegistered(String pluginId) {
         return pluginIds.containsKey(pluginId);
+    }
+
+    public boolean isPluginPackageRegistered(String packageName) {
+        return registeredPluginPackages.contains(packageName);
     }
 
     public Optional<PluginInterface> getPluginById(String pluginId) {
@@ -67,6 +116,37 @@ public class PluginManager {
         for (PluginInterface plugin : plugins) {
             try {
                 plugin.onLoad(application);
+
+                // Register server customizations
+                ServerConfiguration config = plugin.getServerConfiguration();
+                if (config != null) {
+                    ServerCustomizer customizer = ServerCustomizer.getInstance();
+
+                    try {
+                        customizer.registerPortCustomization(config, plugin.getName());
+                    } catch (IllegalStateException e) {
+                        System.err.println("  ├─ ❌ " + e.getMessage());
+                    }
+
+                    try {
+                        customizer.registerHostCustomization(config, plugin.getName());
+                    } catch (IllegalStateException e) {
+                        System.err.println("  ├─ ❌ " + e.getMessage());
+                    }
+
+                    try {
+                        customizer.registerRequestCustomization(config, plugin.getName());
+                    } catch (IllegalStateException e) {
+                        System.err.println("  ├─ ❌ " + e.getMessage());
+                    }
+
+                    try {
+                        customizer.registerResponseCustomization(config, plugin.getName());
+                    } catch (IllegalStateException e) {
+                        System.err.println("  ├─ ❌ " + e.getMessage());
+                    }
+                }
+
                 System.out.println("  ├─ Loaded: " + plugin.getName());
             } catch (Exception e) {
                 System.err.println("  ├─ ❌ Error loading plugin: " + plugin.getName());

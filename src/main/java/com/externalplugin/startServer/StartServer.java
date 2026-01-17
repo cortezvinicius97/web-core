@@ -1,4 +1,4 @@
-package com.example.plugins.startServer;
+package com.externalplugin.startServer;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;

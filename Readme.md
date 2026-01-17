@@ -7,13 +7,13 @@ A lightweight, Spring Boot-inspired web framework for Java that provides automat
 ### Gradle (Groovy)
 
 ```groovy
-implementation 'com.vcinsidedigital:web-core:1.0.2'
+implementation 'com.vcinsidedigital:web-core:1.0.3'
 ```
 
 ### Gradle (Kotlin)
 
 ```kotlin
-implementation("com.vcinsidedigital:web-core:1.0.2")
+implementation("com.vcinsidedigital:web-core:1.0.3")
 ```
 
 ### Maven
@@ -22,7 +22,7 @@ implementation("com.vcinsidedigital:web-core:1.0.2")
 <dependency>
     <groupId>com.vcinsidedigital</groupId>
     <artifactId>web-core</artifactId>
-    <version>1.0.2</version>
+    <version>1.0.3</version>
 </dependency>
 ```
 
@@ -40,6 +40,9 @@ implementation("com.vcinsidedigital:web-core:1.0.2")
 - 🔒 **Middleware System**: Built-in support for request interceptors
 - 📊 **HTTP Status Codes**: Custom status codes with `@ResponseStatus`
 - 🔌 **Plugin System**: Extensible architecture with plugin support
+- 🎨 **Custom Annotations**: Plugins can create custom component and parameter annotations
+- 🌐 **Server Customization**: Plugins can customize port, host, request/response handling
+- 🚪 **Gateway System**: Add server capabilities like sessions, WebSockets, metrics via Gateways
 
 ## 📋 Requirements
 
@@ -549,18 +552,343 @@ public class AuthPlugin extends AbstractPlugin {
 }
 ```
 
+## 🎨 Extensible Annotation System
+
+Plugins can create custom annotations for components and parameters, extending the framework without modifying core code.
+
+### Creating Custom Component Annotations
+
+```java
+// 1. Define the annotation
+package com.myplugin.annotations;
+
+import java.lang.annotation.*;
+
+@Retention(RetentionPolicy.RUNTIME)
+@Target(ElementType.TYPE)
+public @interface ApiController {
+    String version() default "v1";
+}
+
+// 2. Create a handler
+package com.myplugin.handlers;
+
+import com.vcinsidedigital.webcore.extensibility.ComponentAnnotationHandler;
+
+public class ApiControllerHandler implements ComponentAnnotationHandler {
+    
+    @Override
+    public Class<? extends Annotation> getAnnotationType() {
+        return ApiController.class;
+    }
+    
+    @Override
+    public boolean isComponent(Class<?> clazz) {
+        return clazz.isAnnotationPresent(ApiController.class);
+    }
+    
+    @Override
+    public boolean isController(Class<?> clazz) {
+        return true;
+    }
+    
+    @Override
+    public String getBasePath(Class<?> clazz) {
+        ApiController annotation = clazz.getAnnotation(ApiController.class);
+        return "/" + annotation.version();
+    }
+}
+
+// 3. Register in plugin
+@Plugin
+public class CustomAnnotationsPlugin extends AbstractPlugin {
+    
+    @Override
+    public void onLoad(WebServerApplication application) {
+        AnnotationHandlerRegistry.getInstance()
+            .registerComponentHandler(new ApiControllerHandler());
+    }
+}
+
+// 4. Use it!
+@ApiController(version = "v2")
+public class UserController {
+    @Get("/users")  // Full path: /v2/users
+    public HttpResponse getUsers() { ... }
+}
+```
+
+### Creating Custom Parameter Annotations
+
+```java
+// 1. Define the annotation
+@Retention(RetentionPolicy.RUNTIME)
+@Target(ElementType.PARAMETER)
+public @interface Header {
+    String value();
+    boolean required() default true;
+}
+
+// 2. Create a handler
+public class HeaderParameterHandler implements ParameterAnnotationHandler {
+    
+    @Override
+    public Class<? extends Annotation> getAnnotationType() {
+        return Header.class;
+    }
+    
+    @Override
+    public boolean canHandle(Parameter parameter) {
+        return parameter.isAnnotationPresent(Header.class);
+    }
+    
+    @Override
+    public Object resolveParameter(Parameter parameter, ParameterContext context) {
+        Header header = parameter.getAnnotation(Header.class);
+        String value = context.getHeader(header.value());
+        
+        if (value == null && header.required()) {
+            throw new IllegalArgumentException("Required header '" + header.value() + "' is missing");
+        }
+        
+        return value;
+    }
+}
+
+// 3. Register in plugin
+@Override
+public void onLoad(WebServerApplication application) {
+    AnnotationHandlerRegistry.getInstance()
+        .registerParameterHandler(new HeaderParameterHandler());
+}
+
+// 4. Use it!
+@Get("/secure/data")
+public HttpResponse getData(
+    @Header("Authorization") String token,
+    @Header(value = "X-API-Key", required = false) String apiKey
+) {
+    // Headers automatically extracted and validated
+}
+```
+
+### Example Custom Annotations
+
+- **`@Cookie`** - Extract cookies from requests
+- **`@Session`** - Access session data
+- **`@CurrentUser`** - Inject authenticated user
+- **`@Valid`** - Validate request body
+- **`@RateLimit`** - Apply rate limiting
+- **`@Cached`** - Cache responses
+
+## 🛠️ Server Customization
+
+Plugins can customize server configuration without taking full control of initialization.
+
+### Server Configuration
+
+```java
+@Plugin
+public class ServerCustomizationPlugin extends AbstractPlugin {
+    
+    @Override
+    public ServerConfiguration getServerConfiguration() {
+        return new ServerConfiguration() {
+            
+            @Override
+            public Integer getPort() {
+                return 9000; // Custom port
+            }
+            
+            @Override
+            public String getHost() {
+                return "0.0.0.0"; // Bind to all interfaces
+            }
+            
+            @Override
+            public HttpRequest customizeRequest(HttpExchange exchange) throws Exception {
+                // Custom request processing
+                System.out.println("Processing: " + exchange.getRequestURI());
+                return null; // Return null to use default parsing
+            }
+            
+            @Override
+            public void customizeResponse(HttpResponse response, HttpExchange exchange) {
+                // Add custom headers to ALL responses
+                response.header("X-Powered-By", "MyFramework");
+                response.header("X-Frame-Options", "DENY");
+            }
+        };
+    }
+}
+```
+
+### Conflict Detection
+
+Only ONE plugin can customize each aspect:
+
+```
+🔌 Loading plugins:
+  ✅ Port customization registered by: ServerPlugin1
+  ├─ ❌ Port is already customized by another plugin. Only one plugin can customize the port.
+```
+
+**Customizable Aspects:**
+- ✅ Port (one plugin)
+- ✅ Host (one plugin)
+- ✅ Request parsing (one plugin)
+- ✅ Response handling (one plugin)
+- ✅ Gateways (multiple plugins allowed)
+
+## 🚪 Gateway System
+
+Gateways add server capabilities like sessions, metrics, WebSockets, etc.
+
+### Creating a Gateway
+
+```java
+package com.myplugin.gateway;
+
+import com.vcinsidedigital.webcore.server.Gateway;
+import com.sun.net.httpserver.HttpServer;
+
+public class SessionGateway implements Gateway {
+    
+    private final Map<String, Map<String, Object>> sessions = new ConcurrentHashMap<>();
+    
+    @Override
+    public String getName() {
+        return "Session Gateway";
+    }
+    
+    @Override
+    public void initialize(HttpServer server) throws Exception {
+        // Add session endpoint
+        server.createContext("/session", exchange -> {
+            String sessionId = getOrCreateSession(exchange);
+            Map<String, Object> sessionData = sessions.get(sessionId);
+            
+            String response = "{\"sessionId\": \"" + sessionId + "\"}";
+            exchange.sendResponseHeaders(200, response.length());
+            exchange.getResponseBody().write(response.getBytes());
+            exchange.getResponseBody().close();
+        });
+    }
+    
+    @Override
+    public void onStart() {
+        System.out.println("Session management active");
+    }
+    
+    @Override
+    public void onStop() {
+        sessions.clear();
+    }
+    
+    private String getOrCreateSession(HttpExchange exchange) {
+        // Session logic
+    }
+}
+```
+
+### Registering Gateways
+
+```java
+@Plugin
+public class SessionPlugin extends AbstractPlugin {
+    
+    @Override
+    public void onLoad(WebServerApplication application) {
+        ServerCustomizer.getInstance().registerGateway(new SessionGateway());
+        ServerCustomizer.getInstance().registerGateway(new MetricsGateway());
+    }
+}
+```
+
+### Gateway Examples
+
+#### Metrics Gateway
+
+```java
+public class MetricsGateway implements Gateway {
+    
+    private final AtomicLong requestCount = new AtomicLong(0);
+    private final long startTime = System.currentTimeMillis();
+    
+    @Override
+    public void initialize(HttpServer server) throws Exception {
+        server.createContext("/metrics", exchange -> {
+            long uptime = (System.currentTimeMillis() - startTime) / 1000;
+            long requests = requestCount.incrementAndGet();
+            
+            String metrics = String.format(
+                "{\"uptime\": %d, \"requests\": %d}",
+                uptime, requests
+            );
+            
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, metrics.length());
+            exchange.getResponseBody().write(metrics.getBytes());
+            exchange.getResponseBody().close();
+        });
+    }
+}
+```
+
+#### WebSocket Gateway (Example)
+
+```java
+public class WebSocketGateway implements Gateway {
+    
+    @Override
+    public String getName() {
+        return "WebSocket Gateway";
+    }
+    
+    @Override
+    public void initialize(HttpServer server) throws Exception {
+        server.createContext("/ws", exchange -> {
+            // WebSocket handshake and handling
+            // Upgrade connection to WebSocket protocol
+        });
+    }
+}
+```
+
+### Multiple Gateways
+
+Unlike server configuration, **multiple gateways can be registered**:
+
+```
+🔌 Initializing gateways:
+  ├─ Session Gateway initialized
+  ├─ Metrics Gateway initialized
+  ├─ WebSocket Gateway initialized
+  ├─ Health Check Gateway initialized
+    └─ Session management active
+    └─ Metrics endpoint available at /metrics
+    └─ WebSocket server ready
+    └─ Health check at /health
+```
+
 ### Plugin ID Conflicts
 
-Each plugin must have a unique ID. If two plugins share the same ID, a `DuplicatePluginException` is thrown:
+Each plugin must have a unique ID. If two plugins share the same ID, a `DuplicatePluginException` is thrown and the conflicting plugin will not be registered:
 
 ```
-❌ Failed to start application:
-com.vcinsidedigital.webcore.plugin.DuplicatePluginException: Plugin ID conflict detected!
-  Plugin ID: 'com.example.myplugin'
-  Already registered: My Plugin v1.0.0
-  Attempted to register: Another Plugin v2.0.0
+📦 Scanning package: com.example
+  Found 11 components:
+  ✅ Plugin registered: CustomServerPlugin v1.0.0 (ID: com.example.plugins.hello)
+    ├─ ❌ Plugin ID conflict detected!
+  Plugin ID: 'com.example.plugins.hello'
+  Already registered: CustomServerPlugin v1.0.0
+  Attempted to register: Hello Plugin v1.0.0
   Each plugin must have a unique ID.
+    ├─ RestController: SecureController
+    ├─ ⏭️  Skipped (failed plugin): HelloPluginController  # Components from failed plugin are skipped
 ```
+
+**Important:** When a plugin fails to register due to ID conflict, all its components (controllers, services, etc.) are automatically skipped and will not be registered in the application.
 
 **Best Practice:** Use reverse domain notation for plugin IDs:
 - ✅ `com.company.project.pluginname`
@@ -819,21 +1147,20 @@ When you run `WebServerApplication.run()`, the framework:
 
 ## 🆚 Comparison with Spring Boot
 
-| Feature              | This Framework  | Spring Boot       |
-|----------------------|-----------------|-------------------|
-| Dependency Injection | ✅               | ✅                 |
-| Auto-configuration   | ✅               | ✅                 |
-| REST Controllers     | ✅               | ✅                 |
-| Path Variables       | ✅               | ✅                 |
-| Query Parameters     | ✅               | ✅                 |
-| Request Body         | ✅               | ✅                 |
-| Middleware System    | ✅               | ✅                 |
-| Plugin System        | ✅               | ❌                 |
-| Embedded Server      | ✅ (Native/Plugin) | ✅ (Tomcat)        |
-| ORM/database         | ✅ (Plugin)      | ✅ (JPA/Hibernate) |
-| Security             | ✅ (Plugin)       | ✅                 |
-| Validation           | ✅ (Plugin)              | ✅                 |
-| Websockets           | ✅ (Plugin)              | ✅                 |
+| Feature | This Framework | Spring Boot |
+|---------|---------------|-------------|
+| Dependency Injection | ✅ | ✅ |
+| Auto-configuration | ✅ | ✅ |
+| REST Controllers | ✅ | ✅ |
+| Path Variables | ✅ | ✅ |
+| Query Parameters | ✅ | ✅ |
+| Request Body | ✅ | ✅ |
+| Middleware System | ✅ | ✅ |
+| Plugin System | ✅ | ❌ |
+| Embedded Server | ✅ (Native) | ✅ (Tomcat) |
+| JPA/Hibernate | ❌ | ✅ |
+| Security | ❌ (Plugin) | ✅ |
+| Validation | ❌ | ✅ |
 
 ## ⚠️ Limitations
 
@@ -846,7 +1173,8 @@ When you run `WebServerApplication.run()`, the framework:
 
 ## 🚀 Future Enhancements
 
-- ✨ WebSocket support (Plugin)
+- ✨ Exception handlers (`@ExceptionHandler`)
+- ✨ WebSocket support
 - ✨ Async request handling
 - ✨ Bean validation integration
 - ✨ OpenAPI/Swagger documentation
@@ -860,7 +1188,7 @@ Contributions are welcome! Please feel free to submit issues and pull requests.
 
 ## 📄 License
 
-This project is open source and available under the MIT License.
+This project is open source and available under the Apache 2.0 License.
 
 ## 💬 Support
 

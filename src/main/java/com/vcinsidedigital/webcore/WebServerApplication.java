@@ -1,13 +1,18 @@
 package com.vcinsidedigital.webcore;
 
-
 import com.vcinsidedigital.webcore.annotations.*;
 import com.vcinsidedigital.webcore.core.*;
+import com.vcinsidedigital.webcore.extensibility.AnnotationHandlerRegistry;
+import com.vcinsidedigital.webcore.extensibility.ComponentAnnotationHandler;
+import com.vcinsidedigital.webcore.plugin.DuplicatePluginException;
 import com.vcinsidedigital.webcore.plugin.PluginInterface;
 import com.vcinsidedigital.webcore.plugin.PluginManager;
 import com.vcinsidedigital.webcore.routing.Router;
 import com.vcinsidedigital.webcore.http.*;
 import com.sun.net.httpserver.*;
+import com.vcinsidedigital.webcore.server.Gateway;
+import com.vcinsidedigital.webcore.server.ServerCustomizer;
+
 import java.io.*;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
@@ -31,7 +36,6 @@ public abstract class WebServerApplication {
             // Parse port from args
             port = parsePort(args);
             hostName = parseHost(args);
-
 
             // Initialize container, router and plugin manager
             container = new DIContainer();
@@ -146,6 +150,7 @@ public abstract class WebServerApplication {
         List<Class<?>> pluginClasses = new ArrayList<>();
         List<Class<?>> regularComponents = new ArrayList<>();
 
+        // Separate plugins from regular components
         for (Class<?> clazz : classes) {
             if (clazz.isAnnotationPresent(Plugin.class) && PluginInterface.class.isAssignableFrom(clazz)) {
                 pluginClasses.add(clazz);
@@ -154,52 +159,113 @@ public abstract class WebServerApplication {
             }
         }
 
+        // Register ALL plugins first (with validation)
         for (Class<?> clazz : pluginClasses) {
             try {
                 @SuppressWarnings("unchecked")
                 Class<? extends PluginInterface> pluginClass = (Class<? extends PluginInterface>) clazz;
 
                 if (!pluginManager.isPluginRegistered(pluginClass)) {
-                    pluginManager.registerPlugin(pluginClass);
+                    try {
+                        pluginManager.registerPlugin(pluginClass);
+                    } catch (DuplicatePluginException e) {
+                        System.err.println("    ├─ ❌ " + e.getMessage());
+                        // Mark this package as failed so components won't be registered
+                        try {
+                            PluginInterface failedPlugin = pluginClass.getDeclaredConstructor().newInstance();
+                            pluginManager.markPackageAsFailed(failedPlugin.getBasePackage());
+                        } catch (Exception ex) {
+                            // If we can't instantiate, use class package as fallback
+                            pluginManager.markPackageAsFailed(clazz.getPackage().getName());
+                        }
+                    }
                 }
             } catch (Exception e) {
                 System.err.println("    ├─ ❌ Failed to register plugin: " + clazz.getSimpleName());
+                e.printStackTrace();
             }
         }
 
+        // Only register components that are NOT from failed plugin packages
         for (Class<?> clazz : regularComponents) {
-            String type = getComponentType(clazz);
+            String componentPackage = clazz.getPackage().getName();
+
+            // Check if this component belongs to a failed plugin package
+            if (pluginManager.isPackageFailed(componentPackage)) {
+                System.out.println("    ├─ ⏭️  Skipped (failed plugin): " + clazz.getSimpleName());
+                continue;
+            }
+
+            String type = scanner.getComponentType(clazz);
             System.out.println("    ├─ " + type + ": " + clazz.getSimpleName());
             container.register(clazz);
         }
     }
 
-    private static String getComponentType(Class<?> clazz) {
-        if (clazz.isAnnotationPresent(RestController.class)) return "RestController";
-        if (clazz.isAnnotationPresent(Controller.class)) return "Controller";
-        if (clazz.isAnnotationPresent(Service.class)) return "Service";
-        if (clazz.isAnnotationPresent(Repository.class)) return "Repository";
-        if (clazz.isAnnotationPresent(Component.class)) return "Component";
-        return "Unknown";
-    }
-
     private static void registerControllers() {
+        PackageScanner scanner = new PackageScanner();
+
         for (Object instance : container.getAllInstances()) {
             Class<?> clazz = instance.getClass();
-            if (clazz.isAnnotationPresent(RestController.class) ||
-                    clazz.isAnnotationPresent(Controller.class)) {
+
+            // Check built-in controller annotations
+            boolean isController = clazz.isAnnotationPresent(RestController.class) ||
+                    clazz.isAnnotationPresent(Controller.class);
+
+            // Check custom controller handlers
+            if (!isController) {
+                for (ComponentAnnotationHandler handler : AnnotationHandlerRegistry.getInstance().getComponentHandlers()) {
+                    if (handler.isController(clazz)) {
+                        isController = true;
+                        break;
+                    }
+                }
+            }
+
+            if (isController) {
                 router.registerController(instance);
             }
         }
     }
 
     private static void startHttpServer() throws IOException {
-        server = HttpServer.create(new InetSocketAddress(hostName,port), 0);
+        // Apply custom port/host from plugins
+        Integer customPort = ServerCustomizer.getInstance().getCustomPort();
+        String customHost = ServerCustomizer.getInstance().getCustomHost();
+
+        int finalPort = customPort != null ? customPort : port;
+        String finalHost = customHost != null ? customHost : hostName;
+
+        server = HttpServer.create(new InetSocketAddress(finalHost, finalPort), 0);
+
+        // Initialize gateways
+        List<Gateway> gateways = ServerCustomizer.getInstance().getGateways();
+        if (!gateways.isEmpty()) {
+            System.out.println("\n🔌 Initializing gateways:");
+            for (Gateway gateway : gateways) {
+                try {
+                    gateway.initialize(server);
+                    System.out.println("  ├─ " + gateway.getName() + " initialized");
+                } catch (Exception e) {
+                    System.err.println("  ├─ ❌ Failed to initialize gateway: " + gateway.getName());
+                    e.printStackTrace();
+                }
+            }
+        }
 
         server.createContext("/", exchange -> {
             try {
-                HttpRequest request = parseRequest(exchange);
+                // Custom request parsing
+                HttpRequest request = ServerCustomizer.getInstance().customizeRequest(exchange);
+                if (request == null) {
+                    request = parseRequest(exchange); // Use default
+                }
+
                 HttpResponse response = router.handleRequest(request);
+
+                // Custom response handling
+                ServerCustomizer.getInstance().customizeResponse(response, exchange);
+
                 sendResponse(exchange, response);
             } catch (Exception e) {
                 e.printStackTrace();
@@ -210,9 +276,19 @@ public abstract class WebServerApplication {
         server.setExecutor(null);
         server.start();
 
+        // Start gateways
+        for (Gateway gateway : gateways) {
+            try {
+                gateway.onStart();
+            } catch (Exception e) {
+                System.err.println("  ├─ ❌ Error starting gateway: " + gateway.getName());
+                e.printStackTrace();
+            }
+        }
+
         System.out.println("\n╔════════════════════════════════════════════════════╗");
         System.out.println("║   ✅ Application started successfully!             ║");
-        System.out.println("║   🌐 Server running at: http://"+hostName+":" + port + "      ║");
+        System.out.println("║   🌐 Server running at: http://" + finalHost + ":" + finalPort + "      ║");
         System.out.println("║   📝 Press Ctrl+C to stop                          ║");
         System.out.println("╚════════════════════════════════════════════════════╝\n");
     }

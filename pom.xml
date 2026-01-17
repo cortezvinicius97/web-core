@@ -6,7 +6,7 @@
 
     <groupId>com.vcinsidedigital</groupId>
     <artifactId>web-core</artifactId>
-    <version>1.0.2</version>
+    <version>1.0.3</version>
     <packaging>jar</packaging>
 
     <name>Web Core</name>
@@ -53,6 +53,7 @@
                 <configuration>
                     <excludes>
                         <exclude>com/example/**</exclude>
+                        <exclude>com/externalplugin/**</exclude>
                     </excludes>
                 </configuration>
             </plugin>

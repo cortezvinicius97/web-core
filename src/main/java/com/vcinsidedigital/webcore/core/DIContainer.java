@@ -2,6 +2,8 @@ package com.vcinsidedigital.webcore.core;
 
 
 import com.vcinsidedigital.webcore.annotations.*;
+import com.vcinsidedigital.webcore.extensibility.AnnotationHandlerRegistry;
+import com.vcinsidedigital.webcore.extensibility.ComponentAnnotationHandler;
 import java.lang.reflect.*;
 import java.util.*;
 
@@ -10,13 +12,29 @@ public class DIContainer {
     private final Map<Class<?>, Class<?>> bindings = new HashMap<>();
 
     public void register(Class<?> clazz) {
+        if (shouldRegister(clazz)) {
+            getInstance(clazz);
+        }
+    }
+
+    private boolean shouldRegister(Class<?> clazz) {
+        // Check built-in annotations
         if (clazz.isAnnotationPresent(Component.class) ||
                 clazz.isAnnotationPresent(Service.class) ||
                 clazz.isAnnotationPresent(Repository.class) ||
                 clazz.isAnnotationPresent(RestController.class) ||
                 clazz.isAnnotationPresent(Controller.class)) {
-            getInstance(clazz);
+            return true;
         }
+
+        // Check custom component handlers
+        for (ComponentAnnotationHandler handler : AnnotationHandlerRegistry.getInstance().getComponentHandlers()) {
+            if (handler.isComponent(clazz)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public <T> T getInstance(Class<T> clazz) {
