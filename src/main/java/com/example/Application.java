@@ -1,7 +1,6 @@
 package com.example;
 
 import com.externalplugin.annotations.PluginAnnotations;
-import com.example.plugins.hello.HelloPlugin;
 import com.vcinsidedigital.webcore.WebServerApplication;
 import com.vcinsidedigital.webcore.annotations.WebApplication;
 

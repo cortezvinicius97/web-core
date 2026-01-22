@@ -151,6 +151,7 @@ public class PluginManager {
             } catch (Exception e) {
                 System.err.println("  ├─ ❌ Error loading plugin: " + plugin.getName());
                 e.printStackTrace();
+                throw new IllegalStateException("Failed to load plugin: " + plugin.getName(), e);
             }
         }
     }
@@ -164,6 +165,7 @@ public class PluginManager {
             } catch (Exception e) {
                 System.err.println("  ├─ ❌ Error starting plugin: " + plugin.getName());
                 e.printStackTrace();
+                throw new IllegalStateException("Failed to start plugin: " + plugin.getName(), e);
             }
         }
     }
