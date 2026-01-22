@@ -23,6 +23,11 @@ public abstract class AbstractPlugin implements PluginInterface
     }
 
     @Override
+    public void onStop(WebServerApplication application) {
+
+    }
+
+    @Override
     public String getId() {
         // Default: use fully qualified class name as ID
         return this.getClass().getName();

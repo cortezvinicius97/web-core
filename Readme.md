@@ -7,13 +7,13 @@ A lightweight, Spring Boot-inspired web framework for Java that provides automat
 ### Gradle (Groovy)
 
 ```groovy
-implementation 'com.vcinsidedigital:web-core:1.0.4'
+implementation 'com.vcinsidedigital:web-core:1.0.5'
 ```
 
 ### Gradle (Kotlin)
 
 ```kotlin
-implementation("com.vcinsidedigital:web-core:1.0.4")
+implementation("com.vcinsidedigital:web-core:1.0.5")
 ```
 
 ### Maven
@@ -22,7 +22,7 @@ implementation("com.vcinsidedigital:web-core:1.0.4")
 <dependency>
     <groupId>com.vcinsidedigital</groupId>
     <artifactId>web-core</artifactId>
-    <version>1.0.4</version>
+    <version>1.0.5</version>
 </dependency>
 ```
 

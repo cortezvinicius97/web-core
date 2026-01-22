@@ -77,7 +77,7 @@ public abstract class WebServerApplication {
                 System.out.println("\n🚀 Starting HTTP server...");
                 startHttpServer();
             }
-
+            stop();
         } catch (Exception e) {
             System.err.println("\n❌ Failed to start application:");
             e.printStackTrace();
@@ -359,10 +359,15 @@ public abstract class WebServerApplication {
         exchange.close();
     }
 
-    public static void stop() {
+    private static void stop() {
         if (server != null) {
-            server.stop(0);
-            System.out.println("Server stopped.");
+            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                server.stop(0);
+                WebServerApplication app = getInstance();
+                pluginManager.stopPlugins(app);
+                System.out.println("Server stopped.");
+            }));
+
         }
     }
 }

@@ -41,4 +41,9 @@ public class HelloPlugin extends AbstractPlugin
         System.out.println("    ├─ Hello plugin started");
         System.out.println("    └─ Available Middleware Hello");
     }
+
+    @Override
+    public void onStop(WebServerApplication application) {
+        System.out.println("Hello Stopping");
+    }
 }

@@ -170,6 +170,18 @@ public class PluginManager {
         }
     }
 
+    public void stopPlugins(com.vcinsidedigital.webcore.WebServerApplication application){
+        for (PluginInterface plugin : plugins){
+            try{
+                plugin.onStop(application);
+            }catch (Exception e){
+                System.err.println("  ├─ ❌ Error stoping plugin: " + plugin.getName());
+                e.printStackTrace();
+                throw new IllegalStateException("Failed to stop plugin: " + plugin.getName(), e);
+            }
+        }
+    }
+
     public void initializeServer(Router router, String[] args, String hostname, int port) {
         System.out.println("\n⚙️  Initializing server with plugins:");
         for (PluginInterface plugin : plugins) {

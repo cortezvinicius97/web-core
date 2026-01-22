@@ -33,6 +33,12 @@ public interface PluginInterface {
     void onStart(WebServerApplication application);
 
     /**
+     * Called when the application is terminated (after stopping the application).
+     * @param application The web application instance
+     */
+    void onStop(WebServerApplication application);
+
+    /**
      * Get the plugin name
      */
     String getName();
