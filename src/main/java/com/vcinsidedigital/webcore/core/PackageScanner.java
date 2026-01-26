@@ -13,12 +13,40 @@ import java.util.jar.JarFile;
 
 public class PackageScanner {
 
+    // CORREÇÃO: Armazenar o ClassLoader customizado
+    private ClassLoader customClassLoader = null;
+
+    /**
+     * Define um ClassLoader customizado para usar durante o scan
+     * Útil quando a aplicação é carregada via launcher com URLClassLoader
+     */
+    public void setClassLoader(ClassLoader classLoader) {
+        this.customClassLoader = classLoader;
+    }
+
+    /**
+     * Obtém o ClassLoader correto para usar
+     * Prioridade: customClassLoader > contextClassLoader > systemClassLoader
+     */
+    private ClassLoader getEffectiveClassLoader() {
+        if (customClassLoader != null) {
+            return customClassLoader;
+        }
+
+        ClassLoader contextClassLoader = Thread.currentThread().getContextClassLoader();
+        if (contextClassLoader != null) {
+            return contextClassLoader;
+        }
+
+        return ClassLoader.getSystemClassLoader();
+    }
+
     public Set<Class<?>> scanPackage(String packageName) {
         Set<Class<?>> classes = new HashSet<>();
 
         try {
             String path = packageName.replace('.', '/');
-            ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
+            ClassLoader classLoader = getEffectiveClassLoader(); // CORREÇÃO AQUI
             Enumeration<URL> resources = classLoader.getResources(path);
 
             while (resources.hasMoreElements()) {

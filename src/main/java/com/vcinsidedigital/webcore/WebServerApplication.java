@@ -89,6 +89,11 @@ public abstract class WebServerApplication {
         }
     }
 
+    public static void setClassLoader(ClassLoader classLoader) {
+        Thread.currentThread().setContextClassLoader(classLoader);
+    }
+
+
     private static WebServerApplication getInstance() {
         return new WebServerApplication() {};
     }
@@ -150,6 +155,8 @@ public abstract class WebServerApplication {
      */
     private static void discoverAndRegisterPlugins(String basePackage) {
         PackageScanner scanner = new PackageScanner();
+        scanner.setClassLoader(Thread.currentThread().getContextClassLoader());
+
         Set<Class<?>> classes = scanner.scanPackage(basePackage);
 
         List<Class<?>> pluginClasses = new ArrayList<>();
@@ -192,6 +199,9 @@ public abstract class WebServerApplication {
 
     private static void scanAndRegister(String basePackage) {
         PackageScanner scanner = new PackageScanner();
+
+        scanner.setClassLoader(Thread.currentThread().getContextClassLoader());
+
         Set<Class<?>> classes = scanner.scanPackage(basePackage);
 
         System.out.println("  Found " + classes.size() + " components:");
@@ -225,6 +235,8 @@ public abstract class WebServerApplication {
 
     private static void registerControllers() {
         PackageScanner scanner = new PackageScanner();
+
+        scanner.setClassLoader(Thread.currentThread().getContextClassLoader());
 
         for (Object instance : container.getAllInstances()) {
             Class<?> clazz = instance.getClass();
