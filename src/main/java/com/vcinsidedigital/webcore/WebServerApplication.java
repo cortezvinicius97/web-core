@@ -44,14 +44,18 @@ public abstract class WebServerApplication {
             // Get base package
             String basePackage = getBasePackage(applicationClass);
 
-            // Scan and register components from main application
-            System.out.println("📦 Scanning package: " + basePackage);
-            scanAndRegister(basePackage);
+            // ===== FASE 1: Descobrir e registrar APENAS plugins =====
+            System.out.println("📦 Discovering plugins in: " + basePackage);
+            discoverAndRegisterPlugins(basePackage);
 
-            // Load plugins
+            // ===== FASE 2: Carregar plugins (registra handlers customizados) =====
             pluginManager.loadPlugins(getInstance());
 
-            // Scan and register components from plugins
+            // ===== FASE 3: Escanear pacote principal NOVAMENTE (agora com handlers registrados) =====
+            System.out.println("\n📦 Scanning package: " + basePackage);
+            scanAndRegister(basePackage);
+
+            // ===== FASE 4: Escanear pacotes dos plugins =====
             List<String> pluginPackages = pluginManager.getPluginPackages();
             if (!pluginPackages.isEmpty()) {
                 System.out.println("\n📦 Scanning plugin packages:");
@@ -141,25 +145,25 @@ public abstract class WebServerApplication {
         return applicationClass.getPackage().getName();
     }
 
-    private static void scanAndRegister(String basePackage) {
+    /**
+     * Fase 1: Descobre e registra APENAS plugins (não registra outros componentes ainda)
+     */
+    private static void discoverAndRegisterPlugins(String basePackage) {
         PackageScanner scanner = new PackageScanner();
         Set<Class<?>> classes = scanner.scanPackage(basePackage);
 
-        System.out.println("  Found " + classes.size() + " components:");
-
         List<Class<?>> pluginClasses = new ArrayList<>();
-        List<Class<?>> regularComponents = new ArrayList<>();
 
-        // Separate plugins from regular components
+        // Filtrar APENAS plugins
         for (Class<?> clazz : classes) {
             if (clazz.isAnnotationPresent(Plugin.class) && PluginInterface.class.isAssignableFrom(clazz)) {
                 pluginClasses.add(clazz);
-            } else {
-                regularComponents.add(clazz);
             }
         }
 
-        // Register ALL plugins first (with validation)
+        System.out.println("  Found " + pluginClasses.size() + " plugin(s):");
+
+        // Registrar todos os plugins
         for (Class<?> clazz : pluginClasses) {
             try {
                 @SuppressWarnings("unchecked")
@@ -170,12 +174,11 @@ public abstract class WebServerApplication {
                         pluginManager.registerPlugin(pluginClass);
                     } catch (DuplicatePluginException e) {
                         System.err.println("    ├─ ❌ " + e.getMessage());
-                        // Mark this package as failed so components won't be registered
+                        // Mark this package as failed
                         try {
                             PluginInterface failedPlugin = pluginClass.getDeclaredConstructor().newInstance();
                             pluginManager.markPackageAsFailed(failedPlugin.getBasePackage());
                         } catch (Exception ex) {
-                            // If we can't instantiate, use class package as fallback
                             pluginManager.markPackageAsFailed(clazz.getPackage().getName());
                         }
                     }
@@ -185,8 +188,26 @@ public abstract class WebServerApplication {
                 e.printStackTrace();
             }
         }
+    }
 
-        // Only register components that are NOT from failed plugin packages
+    private static void scanAndRegister(String basePackage) {
+        PackageScanner scanner = new PackageScanner();
+        Set<Class<?>> classes = scanner.scanPackage(basePackage);
+
+        System.out.println("  Found " + classes.size() + " components:");
+
+        List<Class<?>> regularComponents = new ArrayList<>();
+
+        // Filtrar APENAS componentes regulares (não plugins)
+        for (Class<?> clazz : classes) {
+            // IGNORAR plugins (eles já foram registrados na fase 1)
+            if (clazz.isAnnotationPresent(Plugin.class) && PluginInterface.class.isAssignableFrom(clazz)) {
+                continue;
+            }
+            regularComponents.add(clazz);
+        }
+
+        // Registrar apenas componentes que NÃO são de pacotes com falha
         for (Class<?> clazz : regularComponents) {
             String componentPackage = clazz.getPackage().getName();
 
